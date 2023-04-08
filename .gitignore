@@ -1,7 +1,6 @@
 samples
 *.pc
-missing_caches.txt
-sample_list.txt
+*.txt
 libvorbis.dll
 libogg.dll
 shaders.dx11
