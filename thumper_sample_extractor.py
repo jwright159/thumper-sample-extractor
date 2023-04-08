@@ -1,11 +1,12 @@
 """Documentation: https://rainbowunicorn7297.github.io/"""
 
-from io import BufferedReader
+from io import BufferedReader, BytesIO
 from os import listdir, makedirs
 from fsb5 import FSB5
 from typing import Callable, Set, Tuple
 from os.path import join, dirname, exists
 from numpy import uint32
+from PIL import Image, UnidentifiedImageError
 
 def hash32(f: str) -> str:
 	"""A magic number is a 32-bit hash value produced by applying a hash function on a string or a byte array.
@@ -51,23 +52,26 @@ def find_file_references(file_name: str, pc: BufferedReader, start_query: str, e
 	barr = bytearray(data)
 	path_index = barr.find(start_query_bytes)
 	while path_index >= 0:
-		ext_index = barr.index(end_query_bytes, path_index)
-		target_path = data[path_index:ext_index+4].decode()
-
-		print(file_name, pc_type, pc_magic_header, magic_header_descriptors[pc_magic_header] if pc_magic_header in magic_header_descriptors else pc_magic_header, hex(path_index), target_path)
-		yield target_path
-
-		path_index = barr.find(start_query_bytes, ext_index)
+		ext_index = barr.index(end_query_bytes, path_index) + len(end_query_bytes)
+		target_path_bytes = data[path_index:ext_index]
+		try:
+			target_path = target_path_bytes.decode()
+			print(file_name, pc_type, pc_magic_header, magic_header_descriptors[pc_magic_header] if pc_magic_header in magic_header_descriptors else pc_magic_header, hex(path_index), target_path)
+			yield target_path
+		except UnicodeDecodeError:
+			print(f'Could not decode {target_path_bytes}')
+		finally:
+			path_index = barr.find(start_query_bytes, ext_index)
 
 Extractor = Callable[[BufferedReader, str, str | None], None]
 
 def extract_mesh(pc: BufferedReader, cache_path: str, save_path: str | None):
 	if save_path is None:
-		save_path = join('samples', 'models', f"{cache_path}.x")
+		save_path = join('extracted', 'meshes', f'{cache_path}.x')
 	print(save_path)
 	makedirs(dirname(save_path), exist_ok=True)
-	with open(save_path, 'wb') as mesh_file:
-		mesh_file.write(pc.read())
+	with open(save_path, 'wb') as file:
+		file.write(pc.read())
 
 def extract_audio(pc: BufferedReader, cache_path: str, save_path: str | None):
 	fsb = FSB5(pc.read())
@@ -76,10 +80,10 @@ def extract_audio(pc: BufferedReader, cache_path: str, save_path: str | None):
 	ext = fsb.get_sample_extension()
 
 	for sample in fsb.samples:
-		if save_path is not None:
-			save_path = save_path[:save_path.rindex('.')] + '.' + ext # it's ogg not wav
+		if save_path is None:
+			save_path = join('extracted', 'samples', f'{sample.name}.{ext}')
 		else:
-			save_path = join('samples', f"{sample.name}.{ext}")
+			save_path = save_path[:save_path.rindex('.')] + '.' + ext # it's ogg not wav
 		#print(cache_path, save_path)
 
 		makedirs(dirname(save_path), exist_ok=True)
@@ -87,6 +91,17 @@ def extract_audio(pc: BufferedReader, cache_path: str, save_path: str | None):
 		with open(save_path, 'wb') as sample_file:
 			rebuilt_sample = fsb.rebuild_sample(sample)
 			sample_file.write(rebuilt_sample)
+
+def extract_texture(pc: BufferedReader, cache_path: str, save_path: str | None):
+	if save_path is None:
+		save_path = join('extracted', 'textures', f'{cache_path}.png')
+	print(save_path)
+	makedirs(dirname(save_path), exist_ok=True)
+	try:
+		texture = Image.open(BytesIO(pc.read()))
+		texture.save(save_path)
+	except UnidentifiedImageError:
+		print(f'Could not load texture file {cache_path}')
 
 file_type_extractors: dict[int, dict[bytes, Extractor | None] | Extractor | None] = {
 	0: None,	# Scoring file. Defines the scoring rules, such as how many points are awarded for each type of action and no miss and no damage bonuses.
@@ -104,7 +119,7 @@ file_type_extractors: dict[int, dict[bytes, Extractor | None] | Extractor | None
 	12: None,	# Texture (.dds, DirectDraw Surface) files
 	13: {
 		b'FSB5': extract_audio,	# Audio sample (FSB5, FMOD Sample Bank) files
-		b'DDS ': None,	# Texture (.dds, DirectDraw Surface) files
+		b'DDS ': extract_texture,	# Texture (.dds, DirectDraw Surface) files
 	},
 	14: None,	# A list of levels (Level 1 – Level 9)
 	28: None,	# Shader files
@@ -181,9 +196,11 @@ def list_all_file_headers():
 			list_file_headers(f, pc)
 
 def main():
-	find_all_references_and_extract('audio sample', 'samples', '.wav', 13, b'FSB5')
+	list_all_file_headers()
+	#find_all_references_and_extract('audio sample', 'samples/', '.wav', 13, b'FSB5')
+	#find_all_references_and_extract('texture', 'fx/textures/', '.png', 13, b'DDS ')
+	#attempt_extract_all(13, b'DDS ')
 	#attempt_extract_all(6, 'xof ') #bytes.fromhex('01000000'))
-	#list_all_file_headers()
 
 if __name__ == '__main__':
 	main()
