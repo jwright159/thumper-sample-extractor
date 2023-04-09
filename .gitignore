@@ -4,3 +4,4 @@ extracted
 libvorbis.dll
 libogg.dll
 shaders.dx11
+*.leaf
